@@ -1,0 +1,274 @@
+---
+title:  "0717_잎 모양에 영향을 미치는 요인 분석"
+author: "Jihye Park, Kihan Kim, Goeun Lee, Dream Park"
+date: '2020 7 17 '
+output:
+    html_document :
+       #code_folding : hide
+
+---
+```{r, include=FALSE}
+hooks = knitr::knit_hooks$get()
+hook_foldable = function(type) {
+  force(type)
+  function(x, options) {
+    res = hooks[[type]](x, options)
+    
+    if (isFALSE(options[[paste0("fold.", type)]])) return(res)
+    
+    paste0(
+      "<details><summary>", type, "</summary>\n\n",
+      res,
+      "\n\n</details>"
+    )
+  }
+}
+knitr::knit_hooks$set(
+  output = hook_foldable("output"),
+  plot = hook_foldable("plot")
+)
+```
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## __leafshape 데이터 불러오기__
+
+```{r}
+ls <- read.csv("C:/Users/LENOVO/Documents/leafshape.csv")
+str(ls)
+summary(ls)
+```
+286행, 4개의 변수
+
+종속변수|독립변수
+-----|----
+Arch (잎 모양)|Bladelen(잎의 길이) /  Petiole(잎자루의 길이) /  Bladewid(잎의 넓이)
+
+0: 아치형- 숙인 잎 모양/ 1: 직립성- 곧은 잎 모양
+
+#### __boxplot 통해 이상치 확인__
+
+```{r}
+par(mfrow=c(2,2))
+boxplot(ls$bladelen, main='Bladelen')
+boxplot(ls$petiole, main='Petiole')
+boxplot(ls$bladewid, main='Bladewid')
+boxplot(ls$arch, main='Arch')
+```
+-----------------------
+
+## __이상치 제거__
+
+이상치 제거를 위해, Upper Fence 이하의 데이터만을 추출 
+
+이상치 제거 후 286개에서 238행으로 축소
+
+#### __bladelen__
+```{r}
+l_Q1 <- quantile(ls$bladelen, probs = c(0.25), na.rm=T)
+l_Q1
+l_Q3 <- quantile(ls$bladelen, probs = c(0.75), na.rm=T)
+l_Q3
+UC <- l_Q3 + 1.5*(l_Q3-l_Q1) # UC : Upper Fence
+UC
+clear_l <- subset(ls, bladelen<UC)
+```
+
+#### __petiole__
+
+```{r}
+p_Q1 <- quantile(clear_l$petiole, probs = c(0.25), na.rm=T)
+p_Q1
+p_Q3 <- quantile(clear_l$petiole, probs = c(0.75), na.rm=T)
+p_Q3
+UC <- p_Q3 + 1.5*(p_Q3-p_Q1)
+UC
+clear_p <- subset(clear_l, petiole<UC)
+```
+
+
+#### __bladewid__
+```{r}
+w_Q1 <- quantile(clear_p$bladewid, probs = c(0.25), na.rm=T)
+w_Q1
+w_Q3 <- quantile(clear_p$bladewid, probs = c(0.75), na.rm=T)
+w_Q3
+UC <- w_Q3 + 1.5*(w_Q3-w_Q1)
+UC
+clear <- subset(clear_p, bladewid<UC)
+```
+
+#### __최종 boxplot__ 
+
+```{r}
+boxplot(clear)
+```
+
+-------------------------
+
+## __히스토그램__
+
+데이터의 정규성 시각적으로 확인
+
+```{r}
+par(mfrow=c(2,2))
+hist(clear$bladelen)
+hist(clear$petiole)
+hist(clear$bladewid)
+hist(clear$arch)
+```
+
+
+-----------------------
+
+## __적합도 검정__
+
+```{r}
+table(clear$arch)
+sum(clear$arch==0)/nrow(clear)
+sum(clear$arch==1)/nrow(clear)
+
+chisq.test(table(clear$arch), p=c(0.79,0.21))
+```
+H0 | 그룹 간 비율에 차이가 없다. (p0=0.79, p1=0.21)
+---|---
+HA | 그룹 간 비율에 1개 이상 차이가 있다. 
+
+* 귀무가설을 기각할 수 없으므로 분석을 하기에 적합한 데이터 모델이라고 판단 
+
+
+------------------
+## __상관관계 분석__
+
+종속변수, 독립변수 간 상관관계 확인
+
+```{r}
+# install.packages("corrgram")
+library(corrgram)
+corrgram(clear, upper.panel = panel.conf)
+```
+
+-------------------
+
+## __로지스틱 회귀분석__
+
+종속변수에 영향을 미치는 독립변수 확인
+
+```{r}
+library(nnet)
+
+datanum <- nrow(clear)
+datanum
+train <- sample(1:datanum)<(datanum*0.8)
+test <- clear[!train,]
+head(test)
+train <- clear[train,]
+head(train)
+lm <- glm(arch~.,data=train, family="binomial")
+lm
+summary(lm)
+```
+
+H0 | 독립변수가 종속변수에 영향을 미친다. 
+---|---
+H1 | 독립변수가 종속변수에 영향을 미치지 않는다.
+
+* petiole(잎자루의 길이), bladewid(잎의 넓이)의 p-value< 0.05이므로 종속변수인 잎의 모양(Arch)에 영향을 미침
+
+* bladelen(잎의 길이)의 p-value>0.05이므로 잎의 모양(Arch)에 영향을 미치지 않음
+
+
+-------------------------
+
+## __변수 선택__
+
+```{r}
+library(mlbench)
+m <- step(lm, direction="both") # 단계적 방법 선택
+formula(m)
+```
+
+* 모든 독립변수를 제거하지 않은 모델의 AIC 가장 낮음 => 가장 좋은 모델
+
+* 가장 연관성이 높은 독립변수 petiole(잎자루의 길이)을 제거한 모델의 AIC 값이 가장 큼
+
+
+-----------------------
+
+## __다중공선성__
+
+독립변수들 간의 상관성 확인
+
+```{r}
+library(car)
+sqrt(vif(m))
+```
+
+* sqrt(VIF(m))<2이므로, bladelen(잎의 길이), petiole(잎자루의 길이)는 다중공선성이 존재하지 않음
+
+* sqrt(VIF(m))>2이므로, bladewid(잎의 넓이)는 다중공선성이 존재
+
+---------------
+
+## __모델의 성능평가__
+```{r}
+predicted <- predict(lm, newdata = test, type="response")
+library(ROCR)
+pr <- prediction(predicted, test$arch)
+pr 
+
+
+prf <- performance(pr, measure="tpr", x.measure="fpr")
+prf
+win.graph();plot(prf, main="Roc of Test Data")
+str(prf)
+
+# ROC에서 그래프의 모습이 이상적인 모형에 가깝게 나옴
+optid<-(1:length(prf@y.values[[1]][-1]))[((prf@x.values[[1]][-1])^2 + (1-prf@y.values[[1]][-11])^2)
+                                         ==min((prf@x.values[[1]][-1])^2 + (1-prf@y.values[[1]][-1])^2)]
+points(prf@x.values[[1]][-1][optid],prf@y.values[[1]][-1][optid], col='red', pch=15) 
+
+optcut<-prf@alpha.values[[1]][-1][optid]; optcut
+optcut # ROC 그래프에서 빨간점으로 표시된 값으로 가장 이상적인 cutoff(0.2372) 값
+table(test$arch, predicted>optcut)
+
+```
+
+--------------
+
+## __회귀모델 데이터 분석 결론__
+
+
+
+
+```{r, eval=F}
+
+Coefficients:
+            Estimate Std. Error z value Pr(>|z|)    
+(Intercept) -0.96324    0.53482  -1.801   0.0717 .  
+bladelen     0.11498    0.07349   1.564   0.1177    
+petiole      2.44441    0.51801   4.719 2.37e-06 ***
+bladewid    -0.91332    0.23380  -3.906 9.37e-05 ***
+```
+
+* 회귀분석 결론 : 잎자루의 길이와 잎의 넓이가 잎의 모양에 영향을 끼침
+
+* 잎의 길이, 잎자루의 길이가 커질수록 곧은 잎 모양이 나올 확률이 높아지고, 잎의 넓이가 커질수록 숙인 잎모양이 나올 확률이 높아짐
+
+```{r, eval=F}
+Start:  AIC=201.07
+arch ~ bladelen + petiole + bladewid
+
+           Df Deviance    AIC
+<none>          193.07 201.07
+- bladelen  1   195.20 201.20
+- bladewid  1   218.80 224.80
+- petiole   1   236.84 242.84
+arch ~ bladelen + petiole + bladewid
+```
+
+* 하지만, 변수 선택 결과 세 가지 변수를 모두 사용하는 것이 가장 적합한 모델로 판단
+
+
+
